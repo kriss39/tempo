@@ -1622,20 +1622,9 @@ mod tests {
         pool: &TempoTransactionPool<MockEthProvider<TempoPrimitives, TempoChainSpec>>,
         pooled: TempoPooledTransaction,
     ) {
-        let state_nonce = pooled.nonce();
-        add_validated_with_state_nonce(pool, pooled, state_nonce);
-    }
-
-    /// Adds `pooled` as if the sender's on-chain nonce (on the transaction's nonce key) were
-    /// `state_nonce`; a `state_nonce` below the transaction nonce parks it as queued.
-    fn add_validated_with_state_nonce(
-        pool: &TempoTransactionPool<MockEthProvider<TempoPrimitives, TempoChainSpec>>,
-        pooled: TempoPooledTransaction,
-        state_nonce: u64,
-    ) {
         let validated = TransactionValidationOutcome::Valid {
             balance: *pooled.cost(),
-            state_nonce,
+            state_nonce: pooled.nonce(),
             bytecode_hash: None,
             transaction: ValidTransaction::new(pooled, None),
             propagate: true,
@@ -1712,11 +1701,24 @@ mod tests {
         let aa_2d_queued_hash = *aa_2d_queued.hash();
         let other_aa_2d_queued_hash = *other_aa_2d_queued.hash();
 
-        add_validated_with_state_nonce(&pool, protocol_pending, 0);
-        add_validated_with_state_nonce(&pool, protocol_queued, 0);
-        add_validated_with_state_nonce(&pool, aa_2d_pending, 0);
-        add_validated_with_state_nonce(&pool, aa_2d_queued, 0);
-        add_validated_with_state_nonce(&pool, other_aa_2d_queued, 0);
+        for pooled in [
+            protocol_pending,
+            protocol_queued,
+            aa_2d_pending,
+            aa_2d_queued,
+            other_aa_2d_queued,
+        ] {
+            let validated = TransactionValidationOutcome::Valid {
+                balance: *pooled.cost(),
+                state_nonce: 0,
+                bytecode_hash: None,
+                transaction: ValidTransaction::new(pooled, None),
+                propagate: true,
+                authorities: None,
+            };
+            pool.add_validated_transaction(TransactionOrigin::External, validated)
+                .expect("transaction should be admitted");
+        }
 
         assert_eq!(pool.pending_and_queued_txn_count(), (2, 3));
 
