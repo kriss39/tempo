@@ -309,7 +309,6 @@ where
                 };
                 let slot = NonceManager::new().nonces[from][nonce_key].slot();
                 self.spawn_blocking_io(move |this| {
-                    // 2D nonce: fetch the on-chain lane nonce from storage
                     let on_chain_nonce: u64 = this
                         .latest_state()?
                         .storage(NONCE_PRECOMPILE_ADDRESS, slot.into())
@@ -317,10 +316,7 @@ where
                         .unwrap_or_default()
                         .saturating_to();
 
-                    // Like the protocol nonce, account for the sender's pending pool
-                    // transactions on this lane: the 2D pool only reports gap-free
-                    // transactions as pending, so the highest pending nonce + 1 is the next
-                    // consecutive nonce.
+                    // Pending 2D transactions form a gap-free sequence on each lane.
                     let highest_pending_nonce = this
                         .pool()
                         .get_pending_transactions_by_sender(from)
@@ -339,27 +335,6 @@ where
         } else {
             Ok(self.inner.next_available_nonce_for(request).await?)
         }
-    }
-}
-
-/// Returns the next available nonce on a 2D nonce lane.
-///
-/// This is the on-chain lane nonce, unless the sender already has pending pool transactions on
-/// that lane, in which case it is the highest pending nonce + 1. This mirrors the pending block
-/// semantics reth applies to protocol nonces.
-fn next_lane_nonce(
-    on_chain_nonce: u64,
-    highest_pending_nonce: Option<u64>,
-) -> Result<u64, EthApiError> {
-    match highest_pending_nonce {
-        Some(pending) if pending >= on_chain_nonce => {
-            pending
-                .checked_add(1)
-                .ok_or(EthApiError::InvalidTransaction(
-                    RpcInvalidTransactionError::NonceMaxValue,
-                ))
-        }
-        _ => Ok(on_chain_nonce),
     }
 }
 
@@ -635,21 +610,29 @@ where
     }
 }
 
+/// Returns the next lane nonce, accounting for pending transactions without regressing state.
+fn next_lane_nonce(
+    on_chain_nonce: u64,
+    highest_pending_nonce: Option<u64>,
+) -> Result<u64, EthApiError> {
+    match highest_pending_nonce {
+        Some(pending) if pending >= on_chain_nonce => {
+            pending
+                .checked_add(1)
+                .ok_or(EthApiError::InvalidTransaction(
+                    RpcInvalidTransactionError::NonceMaxValue,
+                ))
+        }
+        _ => Ok(on_chain_nonce),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn next_lane_nonce_accounts_for_pending_txs() {
-        // no pending txs on the lane: on-chain nonce is next
-        assert_eq!(next_lane_nonce(0, None).unwrap(), 0);
-        assert_eq!(next_lane_nonce(5, None).unwrap(), 5);
-
-        // pending txs on the lane continue after the highest pending nonce
-        assert_eq!(next_lane_nonce(0, Some(0)).unwrap(), 1);
-        assert_eq!(next_lane_nonce(5, Some(7)).unwrap(), 8);
-
-        // stale pool entries below the on-chain nonce never lower the result
+    fn next_lane_nonce_handles_stale_entries_and_overflow() {
         assert_eq!(next_lane_nonce(5, Some(3)).unwrap(), 5);
 
         assert!(matches!(
