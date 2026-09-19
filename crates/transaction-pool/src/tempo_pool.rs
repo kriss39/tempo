@@ -46,7 +46,7 @@ use tempo_primitives::{Block, TempoHeader};
 use tempo_revm::TempoStateAccess;
 
 /// Transaction pool operations for Tempo nonce lanes.
-pub trait TempoPool: TransactionPool {
+pub trait TempoTransactionPoolExt: TransactionPool {
     /// Returns pending transactions in the address's sequential 2D nonce lane.
     fn get_pending_transactions_by_address_and_nonce_key(
         &self,
@@ -1279,7 +1279,7 @@ where
     }
 }
 
-impl<Client, EvmConfig> TempoPool for TempoTransactionPool<Client, EvmConfig>
+impl<Client, EvmConfig> TempoTransactionPoolExt for TempoTransactionPool<Client, EvmConfig>
 where
     EvmConfig: ConfigureTempoPoolEvm,
     Client: StateProviderFactory
