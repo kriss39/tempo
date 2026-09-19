@@ -8,7 +8,7 @@ use alloy::{
 };
 use alloy_network::TransactionResponse;
 use reth_primitives_traits::SignerRecoverable;
-use reth_rpc_eth_api::helpers::LoadState;
+use reth_rpc_eth_api::helpers::{EthTransactions, LoadState};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool, pool::AddedTransactionState};
 use tempo_alloy::rpc::TempoTransactionRequest;
 use tempo_chainspec::spec::TEMPO_T1_BASE_FEE;
@@ -70,13 +70,8 @@ async fn test_get_transaction_by_sender_and_nonce() -> eyre::Result<()> {
     Ok(())
 }
 
-/// The nonce filled in for a 2D nonce key must follow the sender's pending pool transactions on
-/// that key, like the protocol nonce does, otherwise consecutive `eth_sendTransaction` calls
-/// with the same `nonceKey` reuse the same nonce until the first one is mined.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_next_available_nonce_for_2d_key_includes_pending_txs() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
     let mut setup = TestNodeBuilder::new().build_with_node_access().await?;
     let eth_api = setup.node.rpc.inner.eth_api().clone();
 
@@ -93,7 +88,6 @@ async fn test_next_available_nonce_for_2d_key_includes_pending_txs() -> eyre::Re
         ..Default::default()
     };
 
-    // fresh lane: nothing on chain, nothing pending
     assert_eq!(
         eth_api
             .next_available_nonce_for(&request(nonce_key))
@@ -101,7 +95,6 @@ async fn test_next_available_nonce_for_2d_key_includes_pending_txs() -> eyre::Re
         0
     );
 
-    // submit nonce 0 on the lane; the node only mines on `advance_block`, so it stays pending
     let tx = TempoTransaction {
         chain_id: 1337,
         nonce_key,
@@ -127,14 +120,12 @@ async fn test_next_available_nonce_for_2d_key_includes_pending_txs() -> eyre::Re
         .await?;
     assert!(matches!(outcome.state, AddedTransactionState::Pending));
 
-    // the next nonce on that lane follows the pending transaction
     assert_eq!(
         eth_api
             .next_available_nonce_for(&request(nonce_key))
             .await?,
         1
     );
-    // other lanes are unaffected
     assert_eq!(
         eth_api
             .next_available_nonce_for(&request(U256::from(43)))
@@ -142,8 +133,8 @@ async fn test_next_available_nonce_for_2d_key_includes_pending_txs() -> eyre::Re
         0
     );
 
-    // once mined, the on-chain lane nonce gives the same answer
     setup.node.advance_block().await?;
+    assert!(eth_api.transaction_receipt(outcome.hash).await?.is_some());
     assert_eq!(
         eth_api
             .next_available_nonce_for(&request(nonce_key))
