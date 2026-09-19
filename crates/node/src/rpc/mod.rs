@@ -17,7 +17,7 @@ use futures::TryFutureExt;
 pub use operator::{TempoOperatorApiServer, TempoOperatorRpc};
 use reth_primitives_traits::{HeaderTy, SealedHeaderFor, TransactionMeta, WithEncoded};
 use reth_rpc_eth_api::{FromEthApiError, IntoEthApiError, RpcTxReq};
-use reth_transaction_pool::{PoolTransaction, PoolTx, TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, PoolTx, TransactionOrigin};
 pub use simulate::{TempoSimulate, TempoSimulateApiServer, TempoSimulateV1Response};
 use std::{marker::PhantomData, sync::Arc};
 pub use tempo_alloy::rpc::TempoTransactionRequest;
@@ -71,6 +71,7 @@ use tempo_primitives::{
     TEMPO_GAS_PRICE_SCALING_FACTOR, TempoHeader, TempoPrimitives, TempoReceipt, TempoTxEnvelope,
 };
 use tempo_revm::TempoTxEnv;
+use tempo_transaction_pool::TempoTransactionPoolExt;
 use tokio::sync::Mutex;
 
 /// Placeholder constant for `eth_getBalance` calls because the native token balance is N/A on
@@ -86,7 +87,7 @@ pub const NATIVE_BALANCE_PLACEHOLDER: U256 =
 pub trait TempoEthApiBounds:
     RpcNodeCore<
         Primitives = TempoPrimitives,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = TempoTxEnvelope>>,
+        Pool: TempoTransactionPoolExt<Transaction: PoolTransaction<Pooled = TempoTxEnvelope>>,
         Evm: ConfigureEvm<
             Primitives = TempoPrimitives,
             BlockExecutorFactory: BlockExecutorFactory<
@@ -109,7 +110,7 @@ pub trait TempoEthApiBounds:
 impl<N> TempoEthApiBounds for N where
     N: RpcNodeCore<
             Primitives = TempoPrimitives,
-            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = TempoTxEnvelope>>,
+            Pool: TempoTransactionPoolExt<Transaction: PoolTransaction<Pooled = TempoTxEnvelope>>,
             Evm: ConfigureEvm<
                 Primitives = TempoPrimitives,
                 BlockExecutorFactory: BlockExecutorFactory<
@@ -319,9 +320,8 @@ where
                     // Pending 2D transactions form a gap-free sequence on each lane.
                     let highest_pending_nonce = this
                         .pool()
-                        .get_pending_transactions_by_sender(from)
+                        .get_pending_transactions_by_address_and_nonce_key(from, nonce_key)
                         .iter()
-                        .filter(|tx| tx.transaction.consensus_ref().nonce_key() == Some(nonce_key))
                         .map(|tx| tx.nonce())
                         .max();
 
